@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 
-    bia_pipeline.py
+    vrp_pipeline.py
                         --run_folder PATH
                         [--settings PATH] 
                         [--log_file PATH]
@@ -32,7 +32,7 @@ if __name__ == '__main__':
     from optparse import OptionParser
     import StringIO
 
-    parser = OptionParser(version="%prog 1.0", usage = "\n\n    %prog --settings bia_pipeline.config [--target_task TASK] [more_options]")
+    parser = OptionParser(version="%prog 1.0", usage = "\n\n    %prog --settings vrp_pipeline.config [--target_task TASK] [more_options]")
     
                                 
     #
@@ -211,7 +211,7 @@ if __name__ == '__main__':
     #
     #   set up log
     #
-    module_name = "bia_pipeline"
+    module_name = "vrp_pipeline"
     logger = logging.getLogger(module_name)
     setup_std_logging(logger, options.log_file, options.verbose)
 
