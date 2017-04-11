@@ -632,7 +632,7 @@ def trim_unmerged_pairs(inputs, outfqs):
             {in1} {in2} {out1} {unpaired1} {out2} {unpaired2} \
             ILLUMINACLIP:{adapter}:2:30:10 \
             SLIDINGWINDOW:4:15 MINLEN:36 \
-            ".format(in1=inputs[0], in2=inputs[1],
+            ".format(in1=inputs[1], in2=inputs[2],
                      out1=outfqs[0], out2=outfqs[1],
                      unpaired1=outfqs[2], unpaired2=outfqs[3],
                      adapter=adapters)
@@ -651,13 +651,13 @@ def trim_unmerged_pairs(inputs, outfqs):
 #
 @active_if(run_folder != None or input_fastqs != None)
 @transform(merge_reads, suffix('_merged.fq.gz'), '_merged.trimmed.fq.gz')
-def trim_merged_reads(merged_fq, trimmed_fq):
+def trim_merged_reads(input_fqs, trimmed_fq):
     """ Trim merged overlapping reads """
 
     args = "SE -phred33 -threads 1 \
             {fq_in} {fq_out} ILLUMINACLIP:{adapter}:2:30:10 \
             SLIDINGWINDOW:4:15 MINLEN:36 \
-            ".format(fq_in=merged_fq, fq_out=trimmed_fq, adapter=adapters)
+            ".format(fq_in=input_fqs[0], fq_out=trimmed_fq, adapter=adapters)
 #    max_mem = 2048
     run_cmd(trimmomatic, args, #interpreter_args="-Xmx"+str(max_mem)+"m", 
             dockerize=dockerize)#, cpus=1, mem_per_cpu=max_mem)
