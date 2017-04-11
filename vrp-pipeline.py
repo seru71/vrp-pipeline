@@ -350,6 +350,7 @@ if __name__ == '__main__':
     
     # tools
     bcl2fastq = config.get('Tools','bcl2fastq')
+    bbmerge = config.get('Tools', 'bbmerge') 
     trimmomatic = config.get('Tools', 'trimmomatic') 
     fastqc = config.get('Tools', 'fastqc')
     spades = config.get('Tools', 'spades') 
@@ -594,11 +595,11 @@ def link_fastqs(fastq_in, fastq_out):
 # SAMPLE_ID can contain all signs except path delimiter, i.e. "\"
 # 
 @active_if(run_folder != None or input_fastqs != None)
-@collate(link_fastqs, regex(r'(.+)/([^/]+)_S[1-9]\d?_(L\d\d\d)_R[12]_001\.fastq\.gz$'), [r'\1/\2_merged.fq.gz', r'\1/\2_R1.fq.gz', r'\1/\2_R2.fq.gz'])
+@collate(link_fastqs, regex(r'(.+)/([^/]+)_S[1-9]\d?_(L\d\d\d)_R[12]_001\.fastq\.gz$'), [r'\1/\2_merged.fq.gz', r'\1/\2_notmerged_R1.fq.gz', r'\1/\2_notmerged_R2.fq.gz'])
 def merge_reads(inputs, outputs):
 	""" Merge overlapping reads """
 	
-	hist=replace(outputs[0], '_merged.fq.gz','.hist')
+	hist=outputs[0].replace('_merged.fq.gz','.hist')
 	args='in1={fq1} in2={fq2} \
 		  out={fqm} outu1={u1} outu2={u2} \
 		  ihist={hist} adapters={adapters} \
@@ -620,18 +621,21 @@ def merge_reads(inputs, outputs):
 # SAMPLE_ID can contain all signs except path delimiter, i.e. "\"
 #
 @active_if(run_folder != None or input_fastqs != None)
-@collate(merge_reads, regex(r'(.+)/([^/]+)_R[12]\.fq\.gz$'), [r'\1/\2_R1.trimmed.fq.gz', r'\1/\2_R2.trimmed.fq.gz'])
-def trim_paired_reads(inputs, outfqs):
+@transform(merge_reads, formatter('(.+)/(?P<S>[^/]+)_merged\.fq\.gz$', 
+								  '(.+)/(?P<S>[^/]+)_R1\.fq\.gz$', 
+								  '(.+)/(?P<S>[^/]+)_R2\.fq\.gz$'), 
+						['{path[0]}/{S[1]}_R1.trimmed.fq.gz',  '{path[0]}/{S[2]}_R2.trimmed.fq.gz',
+						 '{path[0]}/{S[1]}_R1.unpaired.fq.gz', '{path[0]}/{S[2]}_R2.unpaired.fq.gz',])
+def trim_unmerged_pairs(inputs, outfqs):
     """ Trim nonoverlapping reads """
-    unpaired = [outfqs[0].replace('R1.trimmed.fq.gz','R1.unpaired.fq.gz'), outfqs[1].replace('R2.trimmed.fq.gz','R2.unpaired.fq.gz')]               
     args = "PE -phred33 -threads 1 \
             {in1} {in2} {out1} {unpaired1} {out2} {unpaired2} \
             ILLUMINACLIP:{adapter}:2:30:10 \
             SLIDINGWINDOW:4:15 MINLEN:36 \
             ".format(in1=inputs[0], in2=inputs[1],
-                                       out1=outfqs[0], out2=outfqs[1],
-                                       unpaired1=unpaired[0], unpaired2=unpaired[1],
-                                       adapter=adapters)
+                     out1=outfqs[0], out2=outfqs[1],
+                     unpaired1=outfqs[2], unpaired2=outfqs[3],
+                     adapter=adapters)
 #    max_mem = 2048
     run_cmd(trimmomatic, args, #interpreter_args="-Xmx"+str(max_mem)+"m", 
             dockerize=dockerize)#, cpus=1, mem_per_cpu=max_mem)
@@ -683,7 +687,7 @@ def clean_trimmed_fastqs():
 #
 @jobs_limit(8)
 #@posttask(clean_trimmed_fastqs)
-@collate([trim_merged_reads, trim_paired_reads], formatter(), '{subpath[0][0]}/contigs.fasta')
+@collate([trim_merged_reads, trim_unmerged_pairs], formatter(), '{subpath[0][0]}/contigs.fasta')
 def assemble_reads(fastqs, contigs):
     threads = 4
     mem=8192
@@ -704,7 +708,7 @@ def assemble_reads(fastqs, contigs):
     args = "--s1 {fqm} -1 {fq1} -2 {fq2} \
 			--s2 {fq1u} \
 			-o {out_dir} -m {mem} -t {threads} --careful \
-           ".format(fqm=fqm fq1=fq1, fq2=fq2, fq1u=fq1u, 
+           ".format(fqm=fqm, fq1=fq1, fq2=fq2, fq1u=fq1u, 
 					out_dir=out_dir, mem=mem, threads=threads)
 
     run_cmd(spades, args, dockerize=dockerize, cpus=threads, mem_per_cpu=int(mem/threads))
@@ -727,19 +731,25 @@ def qc_raw_reads(input_fastq, report):
 
 
 @follows(mkdir(os.path.join(runs_scratch_dir,'qc')), mkdir(os.path.join(runs_scratch_dir,'qc','read_qc')))
-@transform(trim_reads, formatter('.+/(?P<SAMPLE_ID>[^/]+)\.fq\.gz$'), 
+@transform(trim_merged_reads, formatter('.+/(?P<SAMPLE_ID>[^/]+)\.fq\.gz$'), 
 	  os.path.join(runs_scratch_dir,'qc','read_qc')+'/{SAMPLE_ID[0]}_fastqc.html')
-#	   os.path.join(runs_scratch_dir,'qc','read_qc')+'/{SAMPLE_ID[1]}_fastqc.html')
-#@transform(trim_reads, formatter(),
-#          (os.path.join(runs_scratch_dir,'qc','read_qc/')+'{basename[0]}_fastqc.html',
-#           os.path.join(runs_scratch_dir,'qc','read_qc/')+'{basename[1]}_fastqc.html'))
-def qc_trimmed_reads(input_fastqs, report_R1):
+def qc_merged_reads(input_fastqs, report):
     """ Generate FastQC report for trimmed FASTQs """
-    report_R2 = report_R1.replace('_R1.fq.gz','_R2.fq.gz')
-    produce_fastqc_report(input_fastqs[0], os.path.dirname(report_R1))
-    produce_fastqc_report(input_fastqs[1], os.path.dirname(report_R2))
+    produce_fastqc_report(input_fastqs, os.path.dirname(report))
 
-@follows(qc_raw_reads, qc_trimmed_reads)
+@follows(mkdir(os.path.join(runs_scratch_dir,'qc')), mkdir(os.path.join(runs_scratch_dir,'qc','read_qc')))
+@transform(trim_unmerged_pairs, 
+		formatter('.+/(?P<SAMPLE_ID>[^/]+)_R1.trimmed\.fq\.gz$'), 
+		[os.path.join(runs_scratch_dir,'qc','read_qc')+'/{SAMPLE_ID[0]}_R1.trimmed.fastqc.html',
+		os.path.join(runs_scratch_dir,'qc','read_qc')+'/{SAMPLE_ID[0]}_R2.trimmed.fastqc.html',
+		os.path.join(runs_scratch_dir,'qc','read_qc')+'/{SAMPLE_ID[0]}_R1.unpaired.fastqc.html',
+		os.path.join(runs_scratch_dir,'qc','read_qc')+'/{SAMPLE_ID[0]}_R2.unpaired.fastqc.html'])
+def qc_unmerged_pairs(input_fastqs, reports):
+    """ Generate FastQC report for trimmed FASTQs """
+    for i in len(input_fastqs):
+		produce_fastqc_report(input_fastqs[i], os.path.dirname(reports[i]))
+
+@follows(qc_raw_reads, qc_merged_reads, qc_unmerged_pairs)
 def qc_reads():
     pass
 
