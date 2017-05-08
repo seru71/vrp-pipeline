@@ -689,31 +689,28 @@ def clean_trimmed_fastqs():
 #@posttask(clean_trimmed_fastqs)
 @collate([trim_merged_reads, trim_unmerged_pairs], formatter(), '{subpath[0][0]}/contigs.fasta')
 def assemble_reads(fastqs, contigs):
+
+
     threads = 4
     mem=8192
 
     out_dir=os.path.dirname(contigs)
-    fastqs=fastqs[0]
+    if not os.path.isdir(out_dir):
+		os.mkdir(out_dir)
+		
+    fqm=fastqs[0]
+    fq1=fastqs[1][0]
+    fq2=fastqs[1][1]
+    fq1u=fastqs[1][2]
+    # fq2u is typicaly low quality
 
-	#
-	#fqm = fastqs[]
-	#fq1=
-	#fq2=
-	#fq1u=
-	# The FASTQ file with unpaired R2 reads is typically small and with
-	# low quality bps, so it is not used in the assembly
-	# fq2u=
-	
-
-    args = "--s1 {fqm} -1 {fq1} -2 {fq2} \
-			--s2 {fq1u} \
-			-o {out_dir} -m {mem} -t {threads} --careful \
-           ".format(fqm=fqm, fq1=fq1, fq2=fq2, fq1u=fq1u, 
-					out_dir=out_dir, mem=mem, threads=threads)
+    args = "--s1 {fqm} --pe1-1 {fq1} --pe1-2 {fq2} --s2 {fq1u} \
+	    -o {out_dir} -m {mem} -t {threads} --careful \
+           ".format(fqm=fqm, fq1=fq1, fq2=fq2, fq1u=fq1u,
+                    out_dir=out_dir, mem=mem, threads=threads)	
 
     run_cmd(spades, args, dockerize=dockerize, cpus=threads, mem_per_cpu=int(mem/threads))
-    
-    
+      
     
     
 
@@ -746,7 +743,7 @@ def qc_merged_reads(input_fastqs, report):
 		os.path.join(runs_scratch_dir,'qc','read_qc')+'/{SAMPLE_ID[0]}_R2.unpaired.fastqc.html'])
 def qc_unmerged_pairs(input_fastqs, reports):
     """ Generate FastQC report for trimmed FASTQs """
-    for i in len(input_fastqs):
+    for i in range(0,len(input_fastqs)):
 		produce_fastqc_report(input_fastqs[i], os.path.dirname(reports[i]))
 
 @follows(qc_raw_reads, qc_merged_reads, qc_unmerged_pairs)
