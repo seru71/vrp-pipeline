@@ -346,11 +346,15 @@ if __name__ == '__main__':
     
     # reference files
     reference = os.path.join(reference_root, config.get('Resources','reference-genome'))    
+    host_genome = os.path.join(reference_root, config.get('Resources','host-genome'))     
+    #filter_databases = [os.path.join(reference_root, db.strip()) for db in config.get('Resources','filter-databases').split(';'))]    
+    silva_database = os.path.join(reference_root, config.get('Resources','silva-database'))     
     adapters = config.get('Resources', 'adapters-fasta')
     
     # tools
     bcl2fastq = config.get('Tools','bcl2fastq')
     bbmerge = config.get('Tools', 'bbmerge') 
+    bbduk = config.get('Tools', 'bbduk')
     trimmomatic = config.get('Tools', 'trimmomatic') 
     fastqc = config.get('Tools', 'fastqc')
     spades = config.get('Tools', 'spades') 
@@ -665,6 +669,41 @@ def trim_merged_reads(input_fqs, trimmed_fq):
 
 
 
+def filter_reads_by_mapping(in_fqs, out_fqs, reference, remove_matching=True):
+	
+	cmd="bwa mem -t {threads} {ref} {fq1} {fq2} | \
+	     samtools view -S -b -{flag} 4 | \
+	     bedtools bamtofastq -i /dev/stdin -fq {out1} \
+	     ".format(threads=threads, ref=genome,
+				fq1=in_fqs[0], fq2=(in_fqs[1] if len(in_fqs)>1 else ""),
+				flag=("f" if remove_matching else "F"))
+	
+	if len(out_fqs) > 1 and len(in_fqs) > 1:
+		cmd += "-fq2 {out2}".format(out2=out_fqs[1])
+
+	#
+	# how to run this pipe using run_cmd?
+	#
+
+
+
+def bbduk_filter(in_fq, out_unmatched, out_matched, ref_db):
+	""" Filter reads by kmer similarity """
+	
+	args="in={fqm} out={out_fq} outm={out_fq_matched} \
+        ref={db} stats={stats} k=31 hdist=0 overwrite=t -Xmx8g \
+        ".format(fqm=in_fq, 
+				out_fq=out_unmatched, out_fq_matched=out_matched,
+				db=ref_db, stats=out_matched+".stats")
+
+	run_cmd(bbduk, args, dockerize=dockerize, cpus=1, mem_per_cpu=4096)
+
+
+@transform(trim_merged_reads, suffix('.fq.gz'), '.filtered.fq.gz', r'\1.matchedSILVA.fq.gz')
+def filter_riborna_from_merged(input_fq, out_filtered, out_matched):
+	bbduk_filter(input_fq, out_filtered, out_matched, silva_database)
+
+
 #
 #
 # Assemble the reads 
@@ -685,14 +724,32 @@ def clean_trimmed_fastqs():
 # The output will be written to SAMPLE_ID directory:
 #    [SAMPLE_ID]/
 #
-@jobs_limit(8)
+
+def spades_assembly(out_dir, fq=None, fq1=None, fq2=None, 
+					fq1_single=None, fq2_single=None, 
+					threads = 4, mem=8192):
+						
+    args = "-o {out_dir} -m {mem} -t {threads} --careful ".format(out_dir=out_dir, mem=mem, threads=threads)
+	
+	# PE inputs if provided
+    if fq1 != None and fq2 != None: 
+        args += " --pe1-1 {fq1} --pe1-2 {fq2}".format(fq1=fq1,fq2=fq2)
+		
+	# add SE inputs
+    i = 1
+    for se_input in [fq, fq1_single, fq2_single]:
+        if se_input != None:
+            args += " --s{index} {se_input}".format(index=i, se_input=se_input)
+            i = i + 1
+	
+    run_cmd(spades, args, dockerize=dockerize, cpus=threads, mem_per_cpu=int(mem/threads))
+
+
+
+@jobs_limit(1)
 #@posttask(clean_trimmed_fastqs)
 @collate([trim_merged_reads, trim_unmerged_pairs], formatter(), '{subpath[0][0]}/contigs.fasta')
-def assemble_reads(fastqs, contigs):
-
-
-    threads = 4
-    mem=8192
+def assemble_all_reads(fastqs, contigs):
 
     out_dir=os.path.dirname(contigs)
     if not os.path.isdir(out_dir):
@@ -704,15 +761,18 @@ def assemble_reads(fastqs, contigs):
     fq1u=fastqs[1][2]
     # fq2u is typicaly low quality
 
-    args = "--s1 {fqm} --pe1-1 {fq1} --pe1-2 {fq2} --s2 {fq1u} \
-	    -o {out_dir} -m {mem} -t {threads} --careful \
-           ".format(fqm=fqm, fq1=fq1, fq2=fq2, fq1u=fq1u,
-                    out_dir=out_dir, mem=mem, threads=threads)	
-
-    run_cmd(spades, args, dockerize=dockerize, cpus=threads, mem_per_cpu=int(mem/threads))
+    spades_assembly(out_dir, fq=fqm, fq1=fq1, fq2=fq2, fq1_single=fq1u)
       
-    
-    
+@jobs_limit(1)
+#@posttask(clean_trimmed_fastqs)
+@transform(filter_riborna_from_merged, formatter(), '{subpath[0][0]}/contigs.fasta')      
+def assemble_filtered_merged_reads(fastq, contigs):
+
+    out_dir=os.path.dirname(contigs)
+    if not os.path.isdir(out_dir):
+		os.mkdir(out_dir)
+		
+    spades_assembly(out_dir, fq=fastq)
 
 #
 #
@@ -756,11 +816,16 @@ def qc_reads():
 #
 
 @follows(mkdir(os.path.join(runs_scratch_dir,'qc')), mkdir(os.path.join(runs_scratch_dir,'qc','assembly_qc')))
-@merge(assemble_reads, os.path.join(runs_scratch_dir, 'qc', 'assembly_qc','quast_report'))
+@merge(assemble_all_reads, os.path.join(runs_scratch_dir, 'qc', 'assembly_qc','quast_report'))
 def qc_assemblies(contigs, report_dir):
     args = ("-o %s " % report_dir) + " ".join(contigs)
     run_cmd(quast, args, dockerize=dockerize)
 
+@follows(mkdir(os.path.join(runs_scratch_dir,'qc')), mkdir(os.path.join(runs_scratch_dir,'qc','assembly_qc')))
+@merge(assemble_filtered_merged_reads, os.path.join(runs_scratch_dir, 'qc', 'assembly_qc','quast_report'))
+def qc_assemblies2(contigs, report_dir):
+    args = ("-o %s " % report_dir) + " ".join(contigs)
+    run_cmd(quast, args, dockerize=dockerize)
 
 
 
