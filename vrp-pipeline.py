@@ -587,6 +587,35 @@ def link_fastqs(fastq_in, fastq_out):
         os.symlink(fastq_in, fastq_out) 
 
     
+
+#
+# Input FASTQ filenames are expected to have following format:
+#    [SAMPLE_ID]_[S_NUM]_[LANE_ID]_[R1|R2]_001.fastq.gz
+# In this step, the two FASTQ files matching on the [SAMPLE_ID]_[S_ID]_[LANE_ID] will be trimmed together (R1 and R2). 
+# The output will be written to two FASTQ files
+#    [SAMPLE_ID]_[LANE_ID].fq1.gz
+#    [SAMPLE_ID]_[LANE_ID].fq2.gz
+# SAMPLE_ID can contain all signs except path delimiter, i.e. "\"
+#
+@active_if(run_folder != None or input_fastqs != None)
+@collate(link_fastqs, regex(r'(.+)/([^/]+)_S[1-9]\d?_(L\d\d\d)_R[12]_001\.fastq\.gz$'), [r'\1/\2_\3_R1.fq.gz', r'\1/\2_\3_R2.fq.gz'])
+def trim_reads(inputs, outfqs):
+    """ Trim reads """
+    unpaired = [outfqs[0].replace('R1.fq.gz','R1_unpaired.fq.gz'), outfqs[1].replace('R2.fq.gz','R2_unpaired.fq.gz')]               
+    args = "PE -phred33 -threads 1 \
+            {in1} {in2} {out1} {unpaired1} {out2} {unpaired2} \
+            ILLUMINACLIP:{adapter}:2:30:10 \
+            SLIDINGWINDOW:4:15 MINLEN:36 \
+            ".format(in1=inputs[0], in2=inputs[1],
+                                       out1=outfqs[0], out2=outfqs[1],
+                                       unpaired1=unpaired[0], unpaired2=unpaired[1],
+                                       adapter=adapters)
+#    max_mem = 2048
+    run_cmd(trimmomatic, args, #interpreter_args="-Xmx"+str(max_mem)+"m", 
+            dockerize=dockerize)#, cpus=1, mem_per_cpu=max_mem)
+    
+    
+    
     
 #
 # Input FASTQ filenames are expected to have following format:
