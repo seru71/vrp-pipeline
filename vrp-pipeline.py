@@ -587,6 +587,15 @@ def link_fastqs(fastq_in, fastq_out):
         os.symlink(fastq_in, fastq_out) 
 
     
+    
+    
+    #8888888888888888888888888888888888888888888888888888
+    #
+    #        T r i m m i n g  /  m e r g i n g
+    #
+    #8888888888888888888888888888888888888888888888888888
+    
+    
 
 #
 # Input FASTQ filenames are expected to have following format:
@@ -598,17 +607,17 @@ def link_fastqs(fastq_in, fastq_out):
 # SAMPLE_ID can contain all signs except path delimiter, i.e. "\"
 #
 @active_if(run_folder != None or input_fastqs != None)
-@collate(link_fastqs, regex(r'(.+)/([^/]+)_S[1-9]\d?_(L\d\d\d)_R[12]_001\.fastq\.gz$'), [r'\1/\2_R1.fq.gz', r'\1/\2_R2.fq.gz'])
+@collate(link_fastqs, regex(r'(.+)/([^/]+)_S[1-9]\d?_(L\d\d\d)_R[12]_001\.fastq\.gz$'), 
+                      [r'\1/\2_R1.fq.gz', r'\1/\2_R2.fq.gz', r'\1/\2_R1_unpaired.fq.gz', r'\1/\2_R2_unpaired.fq.gz'])
 def trim_reads(inputs, outfqs):
     """ Trim reads """
-    unpaired = [outfqs[0].replace('R1.fq.gz','R1_unpaired.fq.gz'), outfqs[1].replace('R2.fq.gz','R2_unpaired.fq.gz')]               
     args = "PE -phred33 -threads 1 \
             {in1} {in2} {out1} {unpaired1} {out2} {unpaired2} \
             ILLUMINACLIP:{adapter}:2:30:10 \
             SLIDINGWINDOW:4:15 MINLEN:36 \
             ".format(in1=inputs[0], in2=inputs[1],
                                        out1=outfqs[0], out2=outfqs[1],
-                                       unpaired1=unpaired[0], unpaired2=unpaired[1],
+                                       unpaired1=outfqs[2], unpaired2=outfqs[3],
                                        adapter=adapters)
 #    max_mem = 2048
     run_cmd(trimmomatic, args, #interpreter_args="-Xmx"+str(max_mem)+"m", 
@@ -697,6 +706,13 @@ def trim_merged_reads(input_fqs, trimmed_fq):
 
 
 
+    #8888888888888888888888888888888888888888888888888888
+    #
+    #              F i l t e r i n g 
+    #
+    #8888888888888888888888888888888888888888888888888888
+
+
 
 def filter_reads_by_mapping(in_fqs, out_fqs, reference, remove_matching=True):
 	
@@ -736,6 +752,30 @@ def bbduk_filter(ref_db, in_fq, out_unmatched, out_matched,
 def filter_riborna_from_merged(input_fq, out_filtered, out_matched):
     """ Filter rRNA from merged reads file """
     bbduk_filter(silva_database, input_fq, out_filtered, out_matched)
+
+
+@transform(trim_reads, 
+            formatter('(.+)/(?P<S>[^/]+)_R1\.fq\.gz$', 
+                      '(.+)/(?P<S>[^/]+)_R2\.fq\.gz$', 
+                      '(.+)/(?P<S>[^/]+)_R1_unpaired\.fq\.gz$',
+                      '(.+)/(?P<S>[^/]+)_R2_unpaired\.fq\.gz$'),
+            ['{path[0]}/{S[0]}_R1.filtered.fq.gz',  
+             '{path[0]}/{S[1]}_R2.filtered.fq.gz',  
+             '{path[0]}/{S[2]}_R1_unpaired.filtered.fq.gz', 
+             '{path[0]}/{S[3]}_R2_unpaired.filtered.fq.gz'],
+            ['{path[0]}/{S[0]}_R1.matchedSILVA.fq.gz', 
+             '{path[0]}/{S[1]}_R2.matchedSILVA.fq.gz',
+             '{path[0]}/{S[2]}_R1_unpaired.matchedSILVA.fq.gz',
+             '{path[0]}/{S[3]}_R2_unpaired.matchedSILVA.fq.gz'])
+def filter_riborna_from_trimmed(input_fqs, filtered_outs, matched_outs):
+    """ Filter rRNA from trimmed reads files """
+    # filter paired 
+    bbduk_filter(silva_database, 
+                 input_fqs[0], filtered_outs[0], matched_outs[0], 
+                 input_fqs[1], filtered_outs[1], matched_outs[1])
+    # filter unpaired
+    bbduk_filter(silva_database, input_fqs[2], filtered_outs[2], matched_outs[2])
+    bbduk_filter(silva_database, input_fqs[3], filtered_outs[3], matched_outs[3])
 
 
 @transform(trim_unmerged_pairs, 
