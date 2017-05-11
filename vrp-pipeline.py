@@ -598,7 +598,7 @@ def link_fastqs(fastq_in, fastq_out):
 # SAMPLE_ID can contain all signs except path delimiter, i.e. "\"
 #
 @active_if(run_folder != None or input_fastqs != None)
-@collate(link_fastqs, regex(r'(.+)/([^/]+)_S[1-9]\d?_(L\d\d\d)_R[12]_001\.fastq\.gz$'), [r'\1/\2_\3_R1.fq.gz', r'\1/\2_\3_R2.fq.gz'])
+@collate(link_fastqs, regex(r'(.+)/([^/]+)_S[1-9]\d?_(L\d\d\d)_R[12]_001\.fastq\.gz$'), [r'\1/\2_R1.fq.gz', r'\1/\2_R2.fq.gz'])
 def trim_reads(inputs, outfqs):
     """ Trim reads """
     unpaired = [outfqs[0].replace('R1.fq.gz','R1_unpaired.fq.gz'), outfqs[1].replace('R2.fq.gz','R2_unpaired.fq.gz')]               
@@ -869,19 +869,21 @@ def qc_raw_reads(input_fastq, report):
 
 
 @follows(mkdir(os.path.join(runs_scratch_dir,'qc')), mkdir(os.path.join(runs_scratch_dir,'qc','read_qc')))
-@transform(trim_reads, formatter('.+/(?P<SAMPLE_ID>[^/]+)\.fq\.gz$'), 
-           os.path.join(runs_scratch_dir,'qc','read_qc/')+'{SAMPLE_ID[0]}_fastqc.html')
-def qc_trimmed_reads(input_fastq, report):
+@transform(trim_reads, formatter('.+/(?P<SAMPLE_ID>[^/]+)\.fq\.gz$', '.+/(?P<SAMPLE_ID>[^/]+)\.fq\.gz$'), 
+           [os.path.join(runs_scratch_dir,'qc','read_qc/')+'{SAMPLE_ID[0]}.fq_fastqc.html',
+            os.path.join(runs_scratch_dir,'qc','read_qc/')+'{SAMPLE_ID[1]}.fq_fastqc.html'])
+def qc_trimmed_reads(input_fastqs, reports):
     """ Generate FastQC report for trimmed PE FASTQs """
-    produce_fastqc_report(input_fastq, os.path.dirname(report))
+    produce_fastqc_report(input_fastqs[0], os.path.dirname(reports[0]))
+    produce_fastqc_report(input_fastqs[1], os.path.dirname(reports[1]))
 
 
 @follows(mkdir(os.path.join(runs_scratch_dir,'qc')), mkdir(os.path.join(runs_scratch_dir,'qc','read_qc')))
 @transform(trim_merged_reads, formatter('.+/(?P<SAMPLE_ID>[^/]+)\.fq\.gz$'), 
 	  os.path.join(runs_scratch_dir,'qc','read_qc')+'/{SAMPLE_ID[0]}_fastqc.html')
-def qc_merged_reads(input_fastqs, report):
+def qc_merged_reads(input_fastq, report):
     """ Generate FastQC report for trimmed FASTQs """
-    produce_fastqc_report(input_fastqs, os.path.dirname(report))
+    produce_fastqc_report(input_fastq, os.path.dirname(report))
 
 @follows(mkdir(os.path.join(runs_scratch_dir,'qc')), mkdir(os.path.join(runs_scratch_dir,'qc','read_qc')))
 @transform(trim_unmerged_pairs, 
