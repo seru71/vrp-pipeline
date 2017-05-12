@@ -745,8 +745,8 @@ def bbduk_filter(ref_db, in_fq, out_unmatched, out_matched,
         args += " in2={fq2} out2={out2} outm2={outm2} \
                 ".format(fq2=in_fq2, out2=out_unmatched2, outm2=out_matched2)
 
-	run_cmd(bbduk, args, dockerize=dockerize, cpus=1, mem_per_cpu=4096)
-
+    run_cmd(bbduk, args, dockerize=dockerize, cpus=1, mem_per_cpu=8192)
+    
 
 @transform(trim_merged_reads, suffix('.fq.gz'), '.filtered.fq.gz', r'\1.matchedSILVA.fq.gz')
 def filter_riborna_from_merged(input_fq, out_filtered, out_matched):
@@ -849,9 +849,9 @@ def run_spades(out_dir, fq=None, fq1=None, fq2=None,
 	
     run_cmd(spades, args, dockerize=dockerize, cpus=threads, mem_per_cpu=int(mem/threads))
 
-def spades_assembly(contigs_file, assembly_name='assembly', **args):
+def spades_assembly(contigs_file, **args):
     
-    out_dir=os.path.join(os.path.dirname(contigs_file), assembly_name)
+    out_dir=os.path.dirname(contigs_file)
     if not os.path.isdir(out_dir):
 		os.mkdir(out_dir)
         
@@ -866,32 +866,50 @@ def spades_assembly(contigs_file, assembly_name='assembly', **args):
 #@posttask(clean_trimmed_fastqs)
 @collate([trim_merged_reads, trim_unmerged_pairs], formatter(), '{subpath[0][0]}/mr_assembly/contigs.fasta')
 def assemble_all_reads(fastqs, contigs):
+    """ Assembles not-filtered reads from merged path, both merged pairs and notmerged are included """
     fqm=fastqs[0]
     fq1=fastqs[1][0]
     fq2=fastqs[1][1]
     fq1u=fastqs[1][2]
     # fq2u is typicaly low quality
 
-    spades_assembly(contigs, 'mr_assembly', fq=fqm, fq1=fq1, fq2=fq2, fq1_single=fq1u)
+    spades_assembly(contigs, fq=fqm, fq1=fq1, fq2=fq2, fq1_single=fq1u)
+
+
+@jobs_limit(1)
+#@posttask(clean_trimmed_fastqs)
+@transform(filter_riborna_from_trimmed, formatter(), '{subpath[0][0]}/ftr_assembly/contigs.fasta')
+def assemble_trimmed_filtered_reads(fastqs, contigs):
+    """ Assembles filtered reads from no-merge path, both paired and unpaired R1 are included """
+    fq1=fastqs[0]
+    fq2=fastqs[1]
+    fq1u=fastqs[2]
+    # fqu2 is typicaly small and low quality
+    #fq2u=fastqs[3]
+
+    spades_assembly(contigs, fq1=fq1, fq2=fq2, fq1_single=fq1u)
+
       
 @jobs_limit(1)
 #@posttask(clean_trimmed_fastqs)
 @transform(filter_riborna_from_merged, formatter(), '{subpath[0][0]}/fmro_assembly_contigs.fasta')      
-def assemble_filtered_merged_reads(fastq, contigs):
-    spades_assembly(contigs, 'fmro_assembly', fq=fastq)
+def assemble_filtered_merged_only_reads(fastq, contigs):
+    """ Assembles filtered reads from merging path, only merged reads are used """
+    spades_assembly(contigs, fq=fastq)
 
 
 @jobs_limit(1)
 #@posttask(clean_trimmed_fastqs)
 @collate([filter_riborna_from_merged, filter_riborna_from_notmerged], formatter(), '{subpath[0][0]}/fmr_assembly_contigs.fasta')      
-def assemble_all_filtered_reads(fastqs, contigs):
+def assemble_filtered_merged_reads(fastqs, contigs):
+    """ Assembles filtered reads from merging path, both merged pairs and not-merged, paired and unpaired R1 are included """
     fqm=fastqs[0]
     fq1=fastqs[1][0]
     fq2=fastqs[1][1]
     fq1u=fastqs[1][2]
     # fq2u is typicaly low quality
 
-    spades_assembly(contigs, 'fmr_assembly', fq=fqm, fq1=fq1, fq2=fq2, fq1_single=fq1u)
+    spades_assembly(contigs, fq=fqm, fq1=fq1, fq2=fq2, fq1_single=fq1u)
 
 
 
@@ -953,7 +971,7 @@ def qc_assemblies(contigs, report_dir):
     run_cmd(quast, args, dockerize=dockerize)
 
 @follows(mkdir(os.path.join(runs_scratch_dir,'qc')), mkdir(os.path.join(runs_scratch_dir,'qc','assembly_qc')))
-@merge(assemble_all_filtered_reads, os.path.join(runs_scratch_dir, 'qc', 'assembly_qc','quast_report'))
+@merge(assemble_filtered_merged_reads, os.path.join(runs_scratch_dir, 'qc', 'assembly_qc','quast_report'))
 def qc_assemblies2(contigs, report_dir):
     args = ("-o %s " % report_dir) + " ".join(contigs)
     run_cmd(quast, args, dockerize=dockerize)
