@@ -591,7 +591,7 @@ def link_fastqs(fastq_in, fastq_out):
     
     #8888888888888888888888888888888888888888888888888888
     #
-    #        T r i m m i n g  /  m e r g i n g
+    #                T r i m m i n g  
     #
     #8888888888888888888888888888888888888888888888888888
     
@@ -624,6 +624,13 @@ def trim_reads(inputs, outfqs):
             dockerize=dockerize)#, cpus=1, mem_per_cpu=max_mem)
     
     
+        
+    #8888888888888888888888888888888888888888888888888888
+    #
+    #        M e r g i n g   &   t r i m m i n g   
+    #
+    #8888888888888888888888888888888888888888888888888888
+
     
     
 #
@@ -746,12 +753,6 @@ def bbduk_filter(ref_db, in_fq, out_unmatched, out_matched,
                 ".format(fq2=in_fq2, out2=out_unmatched2, outm2=out_matched2)
 
     run_cmd(bbduk, args, dockerize=dockerize, cpus=1, mem_per_cpu=8192)
-    
-
-@transform(trim_merged_reads, suffix('.fq.gz'), '.filtered.fq.gz', r'\1.matchedSILVA.fq.gz')
-def filter_riborna_from_merged(input_fq, out_filtered, out_matched):
-    """ Filter rRNA from merged reads file """
-    bbduk_filter(silva_database, input_fq, out_filtered, out_matched)
 
 
 @transform(trim_reads, 
@@ -776,6 +777,13 @@ def filter_riborna_from_trimmed(input_fqs, filtered_outs, matched_outs):
     # filter unpaired
     bbduk_filter(silva_database, input_fqs[2], filtered_outs[2], matched_outs[2])
     bbduk_filter(silva_database, input_fqs[3], filtered_outs[3], matched_outs[3])
+
+    
+
+@transform(trim_merged_reads, suffix('.fq.gz'), '.filtered.fq.gz', r'\1.matchedSILVA.fq.gz')
+def filter_riborna_from_merged(input_fq, out_filtered, out_matched):
+    """ Filter rRNA from merged reads file """
+    bbduk_filter(silva_database, input_fq, out_filtered, out_matched)
 
 
 @transform(trim_unmerged_pairs, 
@@ -847,11 +855,12 @@ def run_spades(out_dir, fq=None, fq1=None, fq2=None,
             args += " --s{index} {se_input}".format(index=i, se_input=se_input)
             i = i + 1
 	
+    print args
     run_cmd(spades, args, dockerize=dockerize, cpus=threads, mem_per_cpu=int(mem/threads))
 
 def spades_assembly(contigs_file, **args):
     
-    out_dir=os.path.dirname(contigs_file)
+    out_dir=os.path.join(os.path.dirname(contigs_file), 'assembly_tmp')
     if not os.path.isdir(out_dir):
 		os.mkdir(out_dir)
         
@@ -864,7 +873,7 @@ def spades_assembly(contigs_file, **args):
 
 @jobs_limit(1)
 #@posttask(clean_trimmed_fastqs)
-@collate([trim_merged_reads, trim_unmerged_pairs], formatter(), '{subpath[0][0]}/mr_assembly/contigs.fasta')
+@collate([trim_merged_reads, trim_unmerged_pairs], formatter(), '{subpath[0][0]}/mr_assembly_contigs.fasta')
 def assemble_all_reads(fastqs, contigs):
     """ Assembles not-filtered reads from merged path, both merged pairs and notmerged are included """
     fqm=fastqs[0]
@@ -878,7 +887,7 @@ def assemble_all_reads(fastqs, contigs):
 
 @jobs_limit(1)
 #@posttask(clean_trimmed_fastqs)
-@transform(filter_riborna_from_trimmed, formatter(), '{subpath[0][0]}/ftr_assembly/contigs.fasta')
+@transform(filter_riborna_from_trimmed, formatter(), '{subpath[0][0]}/ftr_assembly_contigs.fasta')
 def assemble_trimmed_filtered_reads(fastqs, contigs):
     """ Assembles filtered reads from no-merge path, both paired and unpaired R1 are included """
     fq1=fastqs[0]
