@@ -355,6 +355,7 @@ if __name__ == '__main__':
     bcl2fastq = config.get('Tools','bcl2fastq')
     bbmerge = config.get('Tools', 'bbmerge') 
     bbduk = config.get('Tools', 'bbduk')
+    bedtools = config.get('Tools', 'bedtools') 
     trimmomatic = config.get('Tools', 'trimmomatic') 
     fastqc = config.get('Tools', 'fastqc')
     spades = config.get('Tools', 'spades') 
@@ -497,6 +498,41 @@ def run_cmd(cmd, args, dockerize, interpreter_args=None, run_locally=True,
                                  drmaa_session = drmaa_session)
     except error_drmaa_job as err:
         raise Exception("\n".join(map(str, ["Failed to run:", cmd, err, stdout, stderr])))
+
+
+""" 
+Currently only available if not in dockerized mode. 
+Executing in dockerized mode will trigger an exception
+
+Only default job scheduling params of run_command available when executing via SLURM.
+"""
+def run_piped_command(**args):
+	
+	if docker: raise Exception("Piped command not supported in dockerized mode")
+	
+    stdout, stderr = "", ""
+    job_options = "--ntasks=1 \
+                   --cpus-per-task={cpus} \
+                   --mem-per-cpu={mem} \
+                   --time={time} \
+                  ".format(cpus=cpus, mem=int(1.2*mem_per_cpu), time=walltime)
+	
+	full_cmd = expand_piped_command(**args)
+	
+    try:
+        stdout, stderr = run_job(full_cmd.strip(), 
+                                 job_other_options=job_options,
+                                 run_locally = run_locally, 
+                                 retain_job_scripts = retain_job_scripts, job_script_directory = job_script_dir,
+                                 logger=logger, working_directory=os.getcwd(),
+                                 drmaa_session = drmaa_session)
+    except error_drmaa_job as err:
+        raise Exception("\n".join(map(str, ["Failed to run:", cmd, err, stdout, stderr])))
+	
+def expand_piped_command(cmd, args, interpreter_args=None, **args):
+	expanded_cmd = cmd.format(args=args, interpreter_args = interpreter_args if interpreter_args!=None)
+	expanded_cmd += (" | "+expand_piped_command(**args)) if len(**args) > 0 else ""
+	return expanded_cmd
 
 
 def get_sample_ids():
@@ -730,13 +766,17 @@ def filter_reads_by_mapping(in_fqs, out_fqs, reference, remove_matching=True):
 				fq1=in_fqs[0], fq2=(in_fqs[1] if len(in_fqs)>1 else ""),
 				flag=("f" if remove_matching else "F"))
 	
+	bwa_args = "mem -t {threads} {ref} {fq1} {fq2}".format(threads=threads, 
+		ref=genome, fq1=in_fqs[0], fq2=(in_fqs[1] if len(in_fqs)>1 else ""))
+	samtools_args = "view -S -b -{flag} 4 ".format(flag=("f" if remove_matching else "F"))
+	bedtools_args = "bamtofastq -i /dev/stdin -fq {out1}".format(out1=out_fqs)
 	if len(out_fqs) > 1 and len(in_fqs) > 1:
-		cmd += "-fq2 {out2}".format(out2=out_fqs[1])
+		bedtools_args += "-fq2 {out2}".format(out2=out_fqs[1])
 
-	#
-	# how to run this pipe using run_cmd?
-	#
-
+	run_piped_command(bwa, bwa_args, None,
+					samtools, samtools_args, None,
+					bedtools, bedtools_args, None)
+					
 
 
 def bbduk_filter(ref_db, in_fq, out_unmatched, out_matched,
