@@ -508,8 +508,8 @@ Only default job scheduling params of run_command available when executing via S
 """
 def run_piped_command(**args):
 	
-	if docker: raise Exception("Piped command not supported in dockerized mode")
-	
+    if docker: raise Exception("Piped command not supported in dockerized mode")
+    
     stdout, stderr = "", ""
     job_options = "--ntasks=1 \
                    --cpus-per-task={cpus} \
@@ -517,7 +517,7 @@ def run_piped_command(**args):
                    --time={time} \
                   ".format(cpus=cpus, mem=int(1.2*mem_per_cpu), time=walltime)
 	
-	full_cmd = expand_piped_command(**args)
+    full_cmd = expand_piped_command(**args)
 	
     try:
         stdout, stderr = run_job(full_cmd.strip(), 
@@ -529,8 +529,8 @@ def run_piped_command(**args):
     except error_drmaa_job as err:
         raise Exception("\n".join(map(str, ["Failed to run:", cmd, err, stdout, stderr])))
 	
-def expand_piped_command(cmd, args, interpreter_args=None, **args):
-	expanded_cmd = cmd.format(args=args, interpreter_args = interpreter_args if interpreter_args!=None)
+def expand_piped_command(cmd, cmd_args, interpreter_args=None, **args):
+	expanded_cmd = cmd.format(args=cmd_args, interpreter_args = interpreter_args if interpreter_args!=None else "")
 	expanded_cmd += (" | "+expand_piped_command(**args)) if len(**args) > 0 else ""
 	return expanded_cmd
 
@@ -698,54 +698,45 @@ def merge_reads(inputs, outputs):
     
 #
 # Input FASTQ filenames are expected to have following format:
-#    [SAMPLE_ID]_R[12].fq.gz
-# In this step, the two FASTQ files with nonoverlapping R1 and R2 reads will be trimmed together. 
-# The output will be written to two FASTQ files
+#    [SAMPLE_ID]_merged.fq.gz and [SAMPLE_ID]_R[12].fq.gz
+# In this task, merged reads will be trimmed in one step, and next the 
+# two FASTQ files with nonoverlapping R1 and R2 reads will be trimmed together. 
+# The output will be written to five FASTQ files
+#	 [SAMPLE_ID]_merged.trimmed.fq.gz
 #    [SAMPLE_ID]_R1.trimmed.fq.gz
+#    [SAMPLE_ID]_R1.unpaired.fq.gz
 #    [SAMPLE_ID]_R2.trimmed.fq.gz
+#    [SAMPLE_ID]_R2.unpaired.fq.gz
+#
 # SAMPLE_ID can contain all signs except path delimiter, i.e. "\"
 #
 @active_if(run_folder != None or input_fastqs != None)
 @transform(merge_reads, formatter('(.+)/(?P<S>[^/]+)_merged\.fq\.gz$', 
 								  '(.+)/(?P<S>[^/]+)_R1\.fq\.gz$', 
 								  '(.+)/(?P<S>[^/]+)_R2\.fq\.gz$'), 
-						['{path[0]}/{S[1]}_R1.trimmed.fq.gz',  '{path[0]}/{S[2]}_R2.trimmed.fq.gz',
-						 '{path[0]}/{S[1]}_R1.unpaired.fq.gz', '{path[0]}/{S[2]}_R2.unpaired.fq.gz',])
-def trim_unmerged_pairs(inputs, outfqs):
-    """ Trim nonoverlapping reads """
-    args = "PE -phred33 -threads 1 \
+						['{path[0]}/{S[0]}_merged.trimmed.fq.gz',
+						'{path[0]}/{S[1]}_R1.trimmed.fq.gz',  '{path[0]}/{S[2]}_R2.trimmed.fq.gz',
+						'{path[0]}/{S[1]}_R1.unpaired.fq.gz', '{path[0]}/{S[2]}_R2.unpaired.fq.gz',])
+def trim_merged_reads(inputs, outfqs):
+    """ Trim merged and nonoverlapping read pairs """
+
+    args1 = "SE -phred33 -threads 1 \
+            {fq_in} {fq_out} ILLUMINACLIP:{adapter}:2:30:10 \
+            SLIDINGWINDOW:4:15 MINLEN:36 \
+            ".format(fq_in=inputs[0], fq_out=outfqs[0], adapter=adapters)
+    run_cmd(trimmomatic, args1, dockerize=dockerize)
+    
+    
+    args2 = "PE -phred33 -threads 1 \
             {in1} {in2} {out1} {unpaired1} {out2} {unpaired2} \
             ILLUMINACLIP:{adapter}:2:30:10 \
             SLIDINGWINDOW:4:15 MINLEN:36 \
             ".format(in1=inputs[1], in2=inputs[2],
-                     out1=outfqs[0], out2=outfqs[1],
-                     unpaired1=outfqs[2], unpaired2=outfqs[3],
+                     out1=outfqs[1], out2=outfqs[2],
+                     unpaired1=outfqs[3], unpaired2=outfqs[4],
                      adapter=adapters)
-#    max_mem = 2048
-    run_cmd(trimmomatic, args, #interpreter_args="-Xmx"+str(max_mem)+"m", 
-            dockerize=dockerize)#, cpus=1, mem_per_cpu=max_mem)
+    run_cmd(trimmomatic, args2, dockerize=dockerize)
 
-
-#
-# Input FASTQ filename is expected to have following format:
-#    [SAMPLE_ID]_merged.fq.gz
-# In this step, the FASTQ file with merged overlapping reads will be trimmed. 
-# The output will be written to:
-#    [SAMPLE_ID]_merged.trimmed.fq.gz
-# SAMPLE_ID can contain all signs except path delimiter, i.e. "\"
-#
-@active_if(run_folder != None or input_fastqs != None)
-@transform(merge_reads, suffix('_merged.fq.gz'), '_merged.trimmed.fq.gz')
-def trim_merged_reads(input_fqs, trimmed_fq):
-    """ Trim merged overlapping reads """
-
-    args = "SE -phred33 -threads 1 \
-            {fq_in} {fq_out} ILLUMINACLIP:{adapter}:2:30:10 \
-            SLIDINGWINDOW:4:15 MINLEN:36 \
-            ".format(fq_in=input_fqs[0], fq_out=trimmed_fq, adapter=adapters)
-#    max_mem = 2048
-    run_cmd(trimmomatic, args, #interpreter_args="-Xmx"+str(max_mem)+"m", 
-            dockerize=dockerize)#, cpus=1, mem_per_cpu=max_mem)
 
 
 
@@ -818,36 +809,36 @@ def filter_riborna_from_trimmed(input_fqs, filtered_outs, matched_outs):
     bbduk_filter(silva_database, input_fqs[2], filtered_outs[2], matched_outs[2])
     bbduk_filter(silva_database, input_fqs[3], filtered_outs[3], matched_outs[3])
 
-    
 
-@transform(trim_merged_reads, suffix('.fq.gz'), '.filtered.fq.gz', r'\1.matchedSILVA.fq.gz')
-def filter_riborna_from_merged(input_fq, out_filtered, out_matched):
-    """ Filter rRNA from merged reads file """
-    bbduk_filter(silva_database, input_fq, out_filtered, out_matched)
-
-
-@transform(trim_unmerged_pairs, 
-            formatter('(.+)/(?P<S>[^/]+)_R1\.trimmed\.fq\.gz$', 
+@transform(trim_merged_reads, 
+            formatter('(.+)/(?P<S>[^/]+)_merged\.trimmed\.fq\.gz$',
+					  '(.+)/(?P<S>[^/]+)_R1\.trimmed\.fq\.gz$', 
                       '(.+)/(?P<S>[^/]+)_R2\.trimmed\.fq\.gz$', 
                       '(.+)/(?P<S>[^/]+)_R1\.unpaired\.fq\.gz$',
                       '(.+)/(?P<S>[^/]+)_R2\.unpaired\.fq\.gz$'),
-            ['{path[0]}/{S[0]}_R1.trimmed.filtered.fq.gz',  
-             '{path[0]}/{S[1]}_R2.trimmed.filtered.fq.gz',  
-             '{path[0]}/{S[2]}_R1.unpaired.filtered.fq.gz', 
-             '{path[0]}/{S[3]}_R2.unpaired.filtered.fq.gz'],
-            ['{path[0]}/{S[0]}_R1.trimmed.matchedSILVA.fq.gz', 
-             '{path[0]}/{S[1]}_R2.trimmed.matchedSILVA.fq.gz',
-             '{path[0]}/{S[2]}_R1.unpaired.matchedSILVA.fq.gz',
-             '{path[0]}/{S[3]}_R2.unpaired.matchedSILVA.fq.gz'])
-def filter_riborna_from_notmerged(input_fqs, filtered_outs, matched_outs):
-    """ Filter rRNA from not merged reads files """
+            ['{path[0]}/{S[0]}_merged.trimmed.filtered.fq.gz',
+             '{path[0]}/{S[1]}_R1.trimmed.filtered.fq.gz',  
+             '{path[0]}/{S[2]}_R2.trimmed.filtered.fq.gz',  
+             '{path[0]}/{S[3]}_R1.unpaired.filtered.fq.gz', 
+             '{path[0]}/{S[4]}_R2.unpaired.filtered.fq.gz'],
+            ['{path[0]}/{S[0]}_merged.trimmed.matchedSILVA.fq.gz',
+             '{path[0]}/{S[1]}_R1.trimmed.matchedSILVA.fq.gz', 
+             '{path[0]}/{S[2]}_R2.trimmed.matchedSILVA.fq.gz',
+             '{path[0]}/{S[3]}_R1.unpaired.matchedSILVA.fq.gz',
+             '{path[0]}/{S[4]}_R2.unpaired.matchedSILVA.fq.gz'])
+def filter_riborna_from_merged(input_fqs, filtered_outs, matched_outs):
+    """ Filter rRNA from merged trimmed reads, and from not merged read pairs """
+    # filter merged
+    bbduk_filter(silva_database, input_fqs[0], filtered_outs[0], matched_outs[0])
+    
     # filter paired 
     bbduk_filter(silva_database, 
-                 input_fqs[0], filtered_outs[0], matched_outs[0], 
-                 input_fqs[1], filtered_outs[1], matched_outs[1])
+                 input_fqs[1], filtered_outs[1], matched_outs[1], 
+                 input_fqs[2], filtered_outs[2], matched_outs[2])
+                 
     # filter unpaired
-    bbduk_filter(silva_database, input_fqs[2], filtered_outs[2], matched_outs[2])
     bbduk_filter(silva_database, input_fqs[3], filtered_outs[3], matched_outs[3])
+    bbduk_filter(silva_database, input_fqs[4], filtered_outs[4], matched_outs[4])
 
 
 #
@@ -913,13 +904,13 @@ def spades_assembly(contigs_file, **args):
 
 @jobs_limit(1)
 #@posttask(clean_trimmed_fastqs)
-@collate([trim_merged_reads, trim_unmerged_pairs], formatter(), '{subpath[0][0]}/mr_assembly_contigs.fasta')
+@transform(trim_merged_reads, formatter(), '{subpath[0][0]}/mr_assembly_contigs.fasta')
 def assemble_all_reads(fastqs, contigs):
     """ Assembles not-filtered reads from merged path, both merged pairs and notmerged are included """
     fqm=fastqs[0]
-    fq1=fastqs[1][0]
-    fq2=fastqs[1][1]
-    fq1u=fastqs[1][2]
+    fq1=fastqs[1]
+    fq2=fastqs[2]
+    fq1u=fastqs[3]
     # fq2u is typicaly low quality
 
     spades_assembly(contigs, fq=fqm, fq1=fq1, fq2=fq2, fq1_single=fq1u)
@@ -942,20 +933,20 @@ def assemble_trimmed_filtered_reads(fastqs, contigs):
 @jobs_limit(1)
 #@posttask(clean_trimmed_fastqs)
 @transform(filter_riborna_from_merged, formatter(), '{subpath[0][0]}/fmro_assembly_contigs.fasta')      
-def assemble_filtered_merged_only_reads(fastq, contigs):
+def assemble_filtered_merged_only_reads(fastqs, contigs):
     """ Assembles filtered reads from merging path, only merged reads are used """
-    spades_assembly(contigs, fq=fastq)
+    spades_assembly(contigs, fq=fastqs[0])
 
 
 @jobs_limit(1)
 #@posttask(clean_trimmed_fastqs)
-@collate([filter_riborna_from_merged, filter_riborna_from_notmerged], formatter(), '{subpath[0][0]}/fmr_assembly_contigs.fasta')      
+@transform(filter_riborna_from_merged, formatter(), '{subpath[0][0]}/fmr_assembly_contigs.fasta')      
 def assemble_filtered_merged_reads(fastqs, contigs):
     """ Assembles filtered reads from merging path, both merged pairs and not-merged, paired and unpaired R1 are included """
     fqm=fastqs[0]
-    fq1=fastqs[1][0]
-    fq2=fastqs[1][1]
-    fq1u=fastqs[1][2]
+    fq1=fastqs[1]
+    fq2=fastqs[2]
+    fq1u=fastqs[3]
     # fq2u is typicaly low quality
 
     spades_assembly(contigs, fq=fqm, fq1=fq1, fq2=fq2, fq1_single=fq1u)
@@ -986,25 +977,23 @@ def qc_trimmed_reads(input_fastqs, reports):
 
 
 @follows(mkdir(os.path.join(runs_scratch_dir,'qc')), mkdir(os.path.join(runs_scratch_dir,'qc','read_qc')))
-@transform(trim_merged_reads, formatter('.+/(?P<SAMPLE_ID>[^/]+)\.fq\.gz$'), 
-	  os.path.join(runs_scratch_dir,'qc','read_qc')+'/{SAMPLE_ID[0]}_fastqc.html')
-def qc_merged_reads(input_fastq, report):
-    """ Generate FastQC report for trimmed FASTQs """
-    produce_fastqc_report(input_fastq, os.path.dirname(report))
-
-@follows(mkdir(os.path.join(runs_scratch_dir,'qc')), mkdir(os.path.join(runs_scratch_dir,'qc','read_qc')))
-@transform(trim_unmerged_pairs, 
-		formatter('.+/(?P<SAMPLE_ID>[^/]+)_R1.trimmed\.fq\.gz$'), 
-		[os.path.join(runs_scratch_dir,'qc','read_qc')+'/{SAMPLE_ID[0]}_R1.trimmed.fastqc.html',
-		os.path.join(runs_scratch_dir,'qc','read_qc')+'/{SAMPLE_ID[0]}_R2.trimmed.fastqc.html',
-		os.path.join(runs_scratch_dir,'qc','read_qc')+'/{SAMPLE_ID[0]}_R1.unpaired.fastqc.html',
-		os.path.join(runs_scratch_dir,'qc','read_qc')+'/{SAMPLE_ID[0]}_R2.unpaired.fastqc.html'])
-def qc_unmerged_pairs(input_fastqs, reports):
+@transform(trim_merged_reads, 
+		formatter('.+/(?P<SAMPLE_ID>[^/]+)_merged.trimmed\.fq\.gz$',
+				'.+/(?P<SAMPLE_ID>[^/]+)_R1.trimmed\.fq\.gz$',
+				'.+/(?P<SAMPLE_ID>[^/]+)_R2.trimmed\.fq\.gz$',
+				'.+/(?P<SAMPLE_ID>[^/]+)_R1.unpaired\.fq\.gz$',
+				'.+/(?P<SAMPLE_ID>[^/]+)_R2.unpaired\.fq\.gz$'), 
+		[os.path.join(runs_scratch_dir,'qc','read_qc')+'/{SAMPLE_ID[0]}_merged.trimmed.fastqc.html',
+		os.path.join(runs_scratch_dir,'qc','read_qc')+'/{SAMPLE_ID[1]}_R1.trimmed.fastqc.html',
+		os.path.join(runs_scratch_dir,'qc','read_qc')+'/{SAMPLE_ID[2]}_R2.trimmed.fastqc.html',
+		os.path.join(runs_scratch_dir,'qc','read_qc')+'/{SAMPLE_ID[3]}_R1.unpaired.fastqc.html',
+		os.path.join(runs_scratch_dir,'qc','read_qc')+'/{SAMPLE_ID[4]}_R2.unpaired.fastqc.html'])
+def qc_merged_reads(input_fastqs, reports):
     """ Generate FastQC report for trimmed FASTQs """
     for i in range(0,len(input_fastqs)):
 		produce_fastqc_report(input_fastqs[i], os.path.dirname(reports[i]))
 
-@follows(qc_raw_reads, qc_merged_reads, qc_unmerged_pairs)
+@follows(qc_raw_reads, qc_merged_reads)
 def qc_reads():
     pass
 
