@@ -355,7 +355,9 @@ if __name__ == '__main__':
     bcl2fastq = config.get('Tools','bcl2fastq')
     bbmerge = config.get('Tools', 'bbmerge') 
     bbduk = config.get('Tools', 'bbduk')
-    bedtools = config.get('Tools', 'bedtools') 
+    bwa = config.get('Tools', 'bwa')
+    bedtools = config.get('Tools', 'bedtools')
+    samtools = config.get('Tools', 'samtools')
     trimmomatic = config.get('Tools', 'trimmomatic') 
     fastqc = config.get('Tools', 'fastqc')
     spades = config.get('Tools', 'spades') 
@@ -501,15 +503,17 @@ def run_cmd(cmd, args, dockerize, interpreter_args=None, run_locally=True,
 
 
 """ 
-Currently only available if not in dockerized mode. 
-Executing in dockerized mode will trigger an exception
-
+Currently not available in dockerized mode. 
 Only default job scheduling params of run_command available when executing via SLURM.
 """
-def run_piped_command(**args):
-	
-    if docker: raise Exception("Piped command not supported in dockerized mode")
-    
+def run_piped_command(*args):
+    run_locally=True
+    retain_job_scripts = True
+    job_script_dir = os.path.join(runs_scratch_dir, "drmaa")	
+    cpus=1
+    mem_per_cpu=1024
+    walltime="24:00:00"
+ 
     stdout, stderr = "", ""
     job_options = "--ntasks=1 \
                    --cpus-per-task={cpus} \
@@ -517,7 +521,7 @@ def run_piped_command(**args):
                    --time={time} \
                   ".format(cpus=cpus, mem=int(1.2*mem_per_cpu), time=walltime)
 	
-    full_cmd = expand_piped_command(**args)
+    full_cmd = expand_piped_command(*args)
 	
     try:
         stdout, stderr = run_job(full_cmd.strip(), 
@@ -529,9 +533,9 @@ def run_piped_command(**args):
     except error_drmaa_job as err:
         raise Exception("\n".join(map(str, ["Failed to run:", cmd, err, stdout, stderr])))
 	
-def expand_piped_command(cmd, cmd_args, interpreter_args=None, **args):
+def expand_piped_command(cmd, cmd_args, interpreter_args=None, *args):
 	expanded_cmd = cmd.format(args=cmd_args, interpreter_args = interpreter_args if interpreter_args!=None else "")
-	expanded_cmd += (" | "+expand_piped_command(**args)) if len(**args) > 0 else ""
+	expanded_cmd += (" | "+expand_piped_command(*args)) if len(args) > 0 else ""
 	return expanded_cmd
 
 
@@ -760,17 +764,25 @@ def filter_reads_by_mapping(in_fqs, out_fqs, reference, remove_matching=True):
 #	     ".format(threads=threads, ref=genome,
 #				fq1=in_fqs[0], fq2=(in_fqs[1] if len(in_fqs)>1 else ""),
 #				flag=("f" if remove_matching else "F"))
+        threads=2
 	
-	bwa_args = "mem -t {threads} {ref} {fq1} {fq2}".format(threads=threads, 
-		ref=genome, fq1=in_fqs[0], fq2=(in_fqs[1] if len(in_fqs)>1 else ""))
+	bwa_args = "mem -t {threads} {ref} ".format(threads=threads, ref=reference)
+	if isinstance(in_fqs, str):
+		bwa_args += in_fqs
+	else:
+		bwa_args += "%s %s" % (in_fqs[0], in_fqs[1])
+
 	samtools_args = "view -S -b -{flag} 4 ".format(flag=("f" if remove_matching else "F"))
-	bedtools_args = "bamtofastq -i /dev/stdin -fq {out1}".format(out1=out_fqs)
-	if len(out_fqs) > 1 and len(in_fqs) > 1:
-		bedtools_args += "-fq2 {out2}".format(out2=out_fqs[1])
+
+	bedtools_args = "bamtofastq -i /dev/stdin "
+	if isinstance(out_fqs, str) and isinstance(in_fqs, str):
+		bedtools_args += "-fq %s" % out_fqs
+	else:
+		bedtools_args += "-fq {out1} -fq2 {out2}".format(out1=out_fqs[0], out2=out_fqs[1])
 
 	run_piped_command(bwa, bwa_args, None,
-					samtools, samtools_args, None,
-					bedtools, bedtools_args, None)
+	                  samtools, samtools_args, None,
+			  bedtools, bedtools_args, None)
 					
 
 @transform(trim_merged_reads, 
@@ -779,11 +791,11 @@ def filter_reads_by_mapping(in_fqs, out_fqs, reference, remove_matching=True):
                       '(.+)/(?P<S>[^/]+)_R2\.trimmed\.fq\.gz$', 
                       '(.+)/(?P<S>[^/]+)_R1\.unpaired\.fq\.gz$',
                       '(.+)/(?P<S>[^/]+)_R2\.unpaired\.fq\.gz$'),
-            ['{path[0]}/{S[0]}_merged.trimmed.host_filtered.fq.gz',
-             '{path[0]}/{S[1]}_R1.trimmed.host_filtered.fq.gz',  
-             '{path[0]}/{S[2]}_R2.trimmed.host_filtered.fq.gz',  
-             '{path[0]}/{S[3]}_R1.unpaired.host_filtered.fq.gz', 
-             '{path[0]}/{S[4]}_R2.unpaired.host_filtered.fq.gz'])
+            ['{path[0]}/{S[0]}_merged.trimmed.host_filtered.fq',
+             '{path[0]}/{S[1]}_R1.trimmed.host_filtered.fq',  
+             '{path[0]}/{S[2]}_R2.trimmed.host_filtered.fq',  
+             '{path[0]}/{S[3]}_R1.unpaired.host_filtered.fq', 
+             '{path[0]}/{S[4]}_R2.unpaired.host_filtered.fq'])
 def filter_host_genome_from_merged(in_fqs, out_fqs):
 	""" Filter reads matching the host genome """
 	filter_reads_by_mapping(in_fqs[0], out_fqs[0], host_genome)
