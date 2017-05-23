@@ -749,13 +749,17 @@ def trim_merged_reads(inputs, outfqs):
 
 
 def filter_reads_by_mapping(in_fqs, out_fqs, reference, remove_matching=True):
+	""" 
+	Filters reads by removing / keeping those matchin the reference genome. 
+	The genome must be BWA indexed first 
+	"""
 	
-	cmd="bwa mem -t {threads} {ref} {fq1} {fq2} | \
-	     samtools view -S -b -{flag} 4 | \
-	     bedtools bamtofastq -i /dev/stdin -fq {out1} \
-	     ".format(threads=threads, ref=genome,
-				fq1=in_fqs[0], fq2=(in_fqs[1] if len(in_fqs)>1 else ""),
-				flag=("f" if remove_matching else "F"))
+#	cmd="bwa mem -t {threads} {ref} {fq1} {fq2} | \
+#	     samtools view -S -b -{flag} 4 | \
+#	     bedtools bamtofastq -i /dev/stdin -fq {out1} \
+#	     ".format(threads=threads, ref=genome,
+#				fq1=in_fqs[0], fq2=(in_fqs[1] if len(in_fqs)>1 else ""),
+#				flag=("f" if remove_matching else "F"))
 	
 	bwa_args = "mem -t {threads} {ref} {fq1} {fq2}".format(threads=threads, 
 		ref=genome, fq1=in_fqs[0], fq2=(in_fqs[1] if len(in_fqs)>1 else ""))
@@ -768,6 +772,24 @@ def filter_reads_by_mapping(in_fqs, out_fqs, reference, remove_matching=True):
 					samtools, samtools_args, None,
 					bedtools, bedtools_args, None)
 					
+
+@transform(trim_merged_reads, 
+			formatter('(.+)/(?P<S>[^/]+)_merged\.trimmed\.fq\.gz$',
+					  '(.+)/(?P<S>[^/]+)_R1\.trimmed\.fq\.gz$', 
+                      '(.+)/(?P<S>[^/]+)_R2\.trimmed\.fq\.gz$', 
+                      '(.+)/(?P<S>[^/]+)_R1\.unpaired\.fq\.gz$',
+                      '(.+)/(?P<S>[^/]+)_R2\.unpaired\.fq\.gz$'),
+            ['{path[0]}/{S[0]}_merged.trimmed.host_filtered.fq.gz',
+             '{path[0]}/{S[1]}_R1.trimmed.host_filtered.fq.gz',  
+             '{path[0]}/{S[2]}_R2.trimmed.host_filtered.fq.gz',  
+             '{path[0]}/{S[3]}_R1.unpaired.host_filtered.fq.gz', 
+             '{path[0]}/{S[4]}_R2.unpaired.host_filtered.fq.gz'])
+def filter_host_genome_from_merged(in_fqs, out_fqs):
+	""" Filter reads matching the host genome """
+	filter_reads_by_mapping(in_fqs[0], out_fqs[0], host_genome)
+	filter_reads_by_mapping(in_fqs[1:3], out_fqs[1:3], host_genome)
+	filter_reads_by_mapping(in_fqs[3], out_fqs[3], host_genome)
+	filter_reads_by_mapping(in_fqs[4], out_fqs[4], host_genome)
 
 
 def bbduk_filter(ref_db, in_fq, out_unmatched, out_matched,
@@ -839,6 +861,8 @@ def filter_riborna_from_merged(input_fqs, filtered_outs, matched_outs):
     # filter unpaired
     bbduk_filter(silva_database, input_fqs[3], filtered_outs[3], matched_outs[3])
     bbduk_filter(silva_database, input_fqs[4], filtered_outs[4], matched_outs[4])
+
+
 
 
 #
