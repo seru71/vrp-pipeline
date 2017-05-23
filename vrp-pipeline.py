@@ -948,7 +948,17 @@ def assemble_all_reads(fastqs, contigs):
     fq2=fastqs[2]
     fq1u=fastqs[3]
     # fq2u is typicaly low quality
+    spades_assembly(contigs, fq=fqm, fq1=fq1, fq2=fq2, fq1_single=fq1u)
 
+
+@jobs_limit(1)
+@transform(filter_host_genome_from_merged, formatter(), '{subpath[0][0]}/hfmr_assembly_contigs.fasta')
+def assemble_host_filtered_merged_reads(fastqs, contigs):
+    fqm=fastqs[0]
+    fq1=fastqs[1]
+    fq2=fastqs[2]
+    fq1u=fastqs[3]
+    # fq2u is typicaly small and low quality
     spades_assembly(contigs, fq=fqm, fq1=fq1, fq2=fq2, fq1_single=fq1u)
 
 
@@ -962,7 +972,6 @@ def assemble_trimmed_filtered_reads(fastqs, contigs):
     fq1u=fastqs[2]
     # fqu2 is typicaly small and low quality
     #fq2u=fastqs[3]
-
     spades_assembly(contigs, fq1=fq1, fq2=fq2, fq1_single=fq1u)
 
       
@@ -983,10 +992,8 @@ def assemble_filtered_merged_reads(fastqs, contigs):
     fq1=fastqs[1]
     fq2=fastqs[2]
     fq1u=fastqs[3]
-    # fq2u is typicaly low quality
-
+    # fq2u is typicaly small and low quality
     spades_assembly(contigs, fq=fqm, fq1=fq1, fq2=fq2, fq1_single=fq1u)
-
 
 
 #
