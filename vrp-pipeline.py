@@ -940,7 +940,7 @@ def spades_assembly(contigs_file, **args):
 
 @jobs_limit(1)
 #@posttask(clean_trimmed_fastqs)
-@transform(trim_merged_reads, formatter(), '{subpath[0][0]}/mr_assembly_contigs.fasta')
+@transform(trim_merged_reads, formatter(), '{subpath[0][0]}/{subdir[0][0]}_mr.fasta')
 def assemble_all_reads(fastqs, contigs):
     """ Assembles not-filtered reads from merged path, both merged pairs and notmerged are included """
     fqm=fastqs[0]
@@ -952,7 +952,7 @@ def assemble_all_reads(fastqs, contigs):
 
 
 @jobs_limit(1)
-@transform(filter_host_genome_from_merged, formatter(), '{subpath[0][0]}/hfmr_assembly_contigs.fasta')
+@transform(filter_host_genome_from_merged, formatter(), '{subpath[0][0]}/{subdir[0][0]}_hfmr.fasta')
 def assemble_host_filtered_merged_reads(fastqs, contigs):
     fqm=fastqs[0]
     fq1=fastqs[1]
@@ -964,7 +964,7 @@ def assemble_host_filtered_merged_reads(fastqs, contigs):
 
 @jobs_limit(1)
 #@posttask(clean_trimmed_fastqs)
-@transform(filter_riborna_from_trimmed, formatter(), '{subpath[0][0]}/ftr_assembly_contigs.fasta')
+@transform(filter_riborna_from_trimmed, formatter(), '{subpath[0][0]}/{subdir[0][0]}_ftr.fasta')
 def assemble_trimmed_filtered_reads(fastqs, contigs):
     """ Assembles filtered reads from no-merge path, both paired and unpaired R1 are included """
     fq1=fastqs[0]
@@ -977,7 +977,7 @@ def assemble_trimmed_filtered_reads(fastqs, contigs):
       
 @jobs_limit(1)
 #@posttask(clean_trimmed_fastqs)
-@transform(filter_riborna_from_merged, formatter(), '{subpath[0][0]}/fmro_assembly_contigs.fasta')      
+@transform(filter_riborna_from_merged, formatter(), '{subpath[0][0]}/{subdir[0][0]}_fmro.fasta')      
 def assemble_filtered_merged_only_reads(fastqs, contigs):
     """ Assembles filtered reads from merging path, only merged reads are used """
     spades_assembly(contigs, fq=fastqs[0])
@@ -985,7 +985,7 @@ def assemble_filtered_merged_only_reads(fastqs, contigs):
 
 @jobs_limit(1)
 #@posttask(clean_trimmed_fastqs)
-@transform(filter_riborna_from_merged, formatter(), '{subpath[0][0]}/fmr_assembly_contigs.fasta')      
+@transform(filter_riborna_from_merged, formatter(), '{subpath[0][0]}/{subdir[0][0]}_fmr.fasta')      
 def assemble_filtered_merged_reads(fastqs, contigs):
     """ Assembles filtered reads from merging path, both merged pairs and not-merged, paired and unpaired R1 are included """
     fqm=fastqs[0]
