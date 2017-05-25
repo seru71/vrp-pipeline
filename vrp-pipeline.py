@@ -925,75 +925,76 @@ def run_spades(out_dir, fq=None, fq1=None, fq2=None,
     print args
     run_cmd(spades, args, dockerize=dockerize, cpus=threads, mem_per_cpu=int(mem/threads))
 
-def spades_assembly(contigs_file, **args):
+def spades_assembly(scaffolds_file, **args):
     
-    out_dir=os.path.join(os.path.dirname(contigs_file), 'assembly_tmp')
+    out_dir=os.path.join(os.path.dirname(scaffolds_file), 'assembly_tmp')
     if not os.path.isdir(out_dir):
 		os.mkdir(out_dir)
         
     run_spades(out_dir, **args)
     
     import shutil
-    shutil.copy(os.path.join(out_dir,'contigs.fasta'), contigs_file)
+    shutil.copy(os.path.join(out_dir,'scaffolds.fasta'), scaffolds_file)
+    shutil.copy(os.path.join(out_dir,'contigs.fasta'),   scaffolds_file+'.contigs.fasta')
     shutil.rmtree(out_dir)
 
 
 @jobs_limit(1)
 #@posttask(clean_trimmed_fastqs)
 @transform(trim_merged_reads, formatter(), '{subpath[0][0]}/{subdir[0][0]}_mr.fasta')
-def assemble_all_reads(fastqs, contigs):
+def assemble_all_reads(fastqs, scaffolds):
     """ Assembles not-filtered reads from merged path, both merged pairs and notmerged are included """
     fqm=fastqs[0]
     fq1=fastqs[1]
     fq2=fastqs[2]
     fq1u=fastqs[3]
     # fq2u is typicaly low quality
-    spades_assembly(contigs, fq=fqm, fq1=fq1, fq2=fq2, fq1_single=fq1u)
+    spades_assembly(scaffolds, fq=fqm, fq1=fq1, fq2=fq2, fq1_single=fq1u)
 
 
 @jobs_limit(1)
 @transform(filter_host_genome_from_merged, formatter(), '{subpath[0][0]}/{subdir[0][0]}_hfmr.fasta')
-def assemble_host_filtered_merged_reads(fastqs, contigs):
+def assemble_host_filtered_merged_reads(fastqs, scaffolds):
     fqm=fastqs[0]
     fq1=fastqs[1]
     fq2=fastqs[2]
     fq1u=fastqs[3]
     # fq2u is typicaly small and low quality
-    spades_assembly(contigs, fq=fqm, fq1=fq1, fq2=fq2, fq1_single=fq1u)
+    spades_assembly(scaffolds, fq=fqm, fq1=fq1, fq2=fq2, fq1_single=fq1u)
 
 
 @jobs_limit(1)
 #@posttask(clean_trimmed_fastqs)
 @transform(filter_riborna_from_trimmed, formatter(), '{subpath[0][0]}/{subdir[0][0]}_ftr.fasta')
-def assemble_trimmed_filtered_reads(fastqs, contigs):
+def assemble_trimmed_filtered_reads(fastqs, scaffolds):
     """ Assembles filtered reads from no-merge path, both paired and unpaired R1 are included """
     fq1=fastqs[0]
     fq2=fastqs[1]
     fq1u=fastqs[2]
     # fqu2 is typicaly small and low quality
     #fq2u=fastqs[3]
-    spades_assembly(contigs, fq1=fq1, fq2=fq2, fq1_single=fq1u)
+    spades_assembly(scaffolds, fq1=fq1, fq2=fq2, fq1_single=fq1u)
 
       
 @jobs_limit(1)
 #@posttask(clean_trimmed_fastqs)
 @transform(filter_riborna_from_merged, formatter(), '{subpath[0][0]}/{subdir[0][0]}_fmro.fasta')      
-def assemble_filtered_merged_only_reads(fastqs, contigs):
+def assemble_filtered_merged_only_reads(fastqs, scaffolds):
     """ Assembles filtered reads from merging path, only merged reads are used """
-    spades_assembly(contigs, fq=fastqs[0])
+    spades_assembly(scaffolds, fq=fastqs[0])
 
 
 @jobs_limit(1)
 #@posttask(clean_trimmed_fastqs)
 @transform(filter_riborna_from_merged, formatter(), '{subpath[0][0]}/{subdir[0][0]}_fmr.fasta')      
-def assemble_filtered_merged_reads(fastqs, contigs):
+def assemble_filtered_merged_reads(fastqs, scaffolds):
     """ Assembles filtered reads from merging path, both merged pairs and not-merged, paired and unpaired R1 are included """
     fqm=fastqs[0]
     fq1=fastqs[1]
     fq2=fastqs[2]
     fq1u=fastqs[3]
     # fq2u is typicaly small and low quality
-    spades_assembly(contigs, fq=fqm, fq1=fq1, fq2=fq2, fq1_single=fq1u)
+    spades_assembly(scaffolds, fq=fqm, fq1=fq1, fq2=fq2, fq1_single=fq1u)
 
 
 #
@@ -1047,14 +1048,14 @@ def qc_reads():
 
 @follows(mkdir(os.path.join(runs_scratch_dir,'qc')), mkdir(os.path.join(runs_scratch_dir,'qc','assembly_qc')))
 @merge(assemble_all_reads, os.path.join(runs_scratch_dir, 'qc', 'assembly_qc','quast_report'))
-def qc_assemblies(contigs, report_dir):
-    args = ("-o %s " % report_dir) + " ".join(contigs)
+def qc_assemblies(scaffolds, report_dir):
+    args = ("-o %s " % report_dir) + " ".join(scaffolds)
     run_cmd(quast, args, dockerize=dockerize)
 
 @follows(mkdir(os.path.join(runs_scratch_dir,'qc')), mkdir(os.path.join(runs_scratch_dir,'qc','assembly_qc')))
 @merge(assemble_filtered_merged_reads, os.path.join(runs_scratch_dir, 'qc', 'assembly_qc','quast_report'))
-def qc_assemblies2(contigs, report_dir):
-    args = ("-o %s " % report_dir) + " ".join(contigs)
+def qc_assemblies2(scaffolds, report_dir):
+    args = ("-o %s " % report_dir) + " ".join(scaffolds)
     run_cmd(quast, args, dockerize=dockerize)
 
 
