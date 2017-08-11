@@ -877,10 +877,87 @@ def filter_riborna_from_merged(input_fqs, filtered_outs, matched_outs):
 
 
 
-#
-#
-# Assemble the reads 
-# 
+
+    #8888888888888888888888888888888888888888888888888888
+    #
+    #                   M a p p i n g 
+    #
+    #8888888888888888888888888888888888888888888888888888
+
+
+
+
+def bwa_map_and_sort(output_bam, reference, fq1, fq2=None, threads=1):
+	bwa_args = "mem -t {threads} {ref} {fq1} \
+	           ".format(threads=threads, ref=reference, fq1=fq1)
+	if fq2 != None:
+		bwa_args += fq2
+
+	samtools_args = "sort -o {out}".format(out=output_bam)
+
+	run_piped_command(bwa, bwa_args, None,
+	                  samtools, samtools_args, None)
+
+def merge_bams(out_bam, *in_bams):
+	threads = 1
+	mem = 4096
+	
+	args = "merge %s" % out_bam
+	for bam in in_bams:
+		args += (" "+bam)
+		
+	run_cmd(samtools, args, dockerize=dockerize, cpus=threads, mem_per_cpu=int(mem/threads))
+	
+	
+def map_reads(fastq_list, output_bam):
+    
+    tmp_bams = [ bam_file+str(i) for i in range(0, len(fastq_list)) ]
+    for i in range(0, len(fastq_list)):
+		if isinstance(fastq_list[i], tuple):
+			bwa_map_and_sort(tmp_bams[i], reference, fastq_list[i][0], fastq_list[i][1])
+		else:
+			bwa_map_and_sort(tmp_bams[i], reference, fastq_list[i])   
+    
+    merge_bams(out_bam, *tmp_bams)
+    
+    for f in tmp_bams:
+		  os.remove(f)
+
+
+
+@jobs_limit(1)
+@transform(filter_host_genome_from_merged, formatter(), "{subpath[0][0]}/{subdir[0][0]}.bam")
+def map_host_filtered_merged_reads(fastqs, bam_file):
+    """ Maps host-filtered reads from merging path. Both merged pairs and not-merged, paired and unpaired R1 are included """
+    fqm=fastqs[0]
+    fq1=fastqs[1]
+    fq2=fastqs[2]
+    fq1u=fastqs[3]
+    # fq2u is typicaly small and low quality
+
+    map_reads([fqm, (fq1,fq2), fqu1], bam_file)
+
+@jobs_limit(1)
+@transform(filter_riborna_from_merged, formatter(), "{subpath[0][0]}/{subdir[0][0]}.bam")
+def map_ribo_filtered_merged_reads(fastqs, bam_file):
+    """ Maps ribo-filtered reads from merging path. Both merged pairs and not-merged, paired and unpaired R1 are included """
+    fqm=fastqs[0]
+    fq1=fastqs[1]
+    fq2=fastqs[2]
+    fq1u=fastqs[3]
+    # fq2u is typicaly small and low quality
+
+    map_reads([fqm, (fq1,fq2), fqu1], bam_file)
+
+
+
+
+    #8888888888888888888888888888888888888888888888888888
+    #
+    #                  A s s e m b l y
+    #
+    #8888888888888888888888888888888888888888888888888888
+
 
 
 def clean_trimmed_fastqs():
