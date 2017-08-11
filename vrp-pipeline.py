@@ -358,6 +358,7 @@ if __name__ == '__main__':
     bwa = config.get('Tools', 'bwa')
     bedtools = config.get('Tools', 'bedtools')
     samtools = config.get('Tools', 'samtools')
+    lofreq = config.get('Tools', 'lofreq')
     trimmomatic = config.get('Tools', 'trimmomatic') 
     fastqc = config.get('Tools', 'fastqc')
     spades = config.get('Tools', 'spades') 
@@ -531,7 +532,7 @@ def run_piped_command(*args):
                                  logger=logger, working_directory=os.getcwd(),
                                  drmaa_session = drmaa_session)
     except error_drmaa_job as err:
-        raise Exception("\n".join(map(str, ["Failed to run:", cmd, err, stdout, stderr])))
+        raise Exception("\n".join(map(str, ["Failed to run:", full_cmd, err, stdout, stderr])))
 	
 def expand_piped_command(cmd, cmd_args, interpreter_args=None, *args):
 	expanded_cmd = cmd.format(args=cmd_args, interpreter_args = interpreter_args if interpreter_args!=None else "")
@@ -887,9 +888,9 @@ def filter_riborna_from_merged(input_fqs, filtered_outs, matched_outs):
 
 
 
-def bwa_map_and_sort(output_bam, reference, fq1, fq2=None, threads=1):
+def bwa_map_and_sort(output_bam, ref_genome, fq1, fq2=None, threads=1):
 	bwa_args = "mem -t {threads} {ref} {fq1} \
-	           ".format(threads=threads, ref=reference, fq1=fq1)
+	           ".format(threads=threads, ref=ref_genome, fq1=fq1)
 	if fq2 != None:
 		bwa_args += fq2
 
@@ -909,14 +910,14 @@ def merge_bams(out_bam, *in_bams):
 	run_cmd(samtools, args, dockerize=dockerize, cpus=threads, mem_per_cpu=int(mem/threads))
 	
 	
-def map_reads(fastq_list, output_bam):
+def map_reads(fastq_list, ref_genome, output_bam):
     
     tmp_bams = [ bam_file+str(i) for i in range(0, len(fastq_list)) ]
     for i in range(0, len(fastq_list)):
 		if isinstance(fastq_list[i], tuple):
-			bwa_map_and_sort(tmp_bams[i], reference, fastq_list[i][0], fastq_list[i][1])
+			bwa_map_and_sort(tmp_bams[i], ref_genome, fastq_list[i][0], fastq_list[i][1])
 		else:
-			bwa_map_and_sort(tmp_bams[i], reference, fastq_list[i])   
+			bwa_map_and_sort(tmp_bams[i], ref_genome, fastq_list[i])   
     
     merge_bams(out_bam, *tmp_bams)
     
@@ -935,7 +936,7 @@ def map_host_filtered_merged_reads(fastqs, bam_file):
     fq1u=fastqs[3]
     # fq2u is typicaly small and low quality
 
-    map_reads([fqm, (fq1,fq2), fqu1], bam_file)
+    map_reads([fqm, (fq1,fq2), fqu1], reference, bam_file)
 
 @jobs_limit(1)
 @transform(filter_riborna_from_merged, formatter(), "{subpath[0][0]}/{subdir[0][0]}.bam")
@@ -947,7 +948,34 @@ def map_ribo_filtered_merged_reads(fastqs, bam_file):
     fq1u=fastqs[3]
     # fq2u is typicaly small and low quality
 
-    map_reads([fqm, (fq1,fq2), fqu1], bam_file)
+    map_reads([fqm, (fq1,fq2), fqu1], reference, bam_file)
+
+
+
+
+
+
+    #8888888888888888888888888888888888888888888888888888
+    #
+    #         V a r i a n t   c a l l i n g
+    #
+    #8888888888888888888888888888888888888888888888888888
+
+
+
+def call_variants_lofreq(bam, vcf, ref_genome):
+    
+    threads = 1
+    mem = 4096
+    args = "call -f {ref} - o {vcf} {bam} \
+           ".format(ref=ref_genome, vcf=vcf, bam=bam)
+    run_cmd(lofreq, args, dockerize=dockerize, cpus=threads, mem_per_cpu=int(mem/threads))
+
+
+@transform(map_ribo_filtered_merged_reads, suffix(".bam"), ".lofreq.vcf")
+def call_variants_on_host_filtered(bam, vcf):
+	""" Call variants using lofreq* on host filtered mapped reads """
+	call_variants_lofreq(bam, vcf, reference)
 
 
 
