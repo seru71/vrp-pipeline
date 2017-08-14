@@ -912,14 +912,14 @@ def merge_bams(out_bam, *in_bams):
 	
 def map_reads(fastq_list, ref_genome, output_bam):
     
-    tmp_bams = [ bam_file+str(i) for i in range(0, len(fastq_list)) ]
+    tmp_bams = [ output_bam+str(i) for i in range(0, len(fastq_list)) ]
     for i in range(0, len(fastq_list)):
 		if isinstance(fastq_list[i], tuple):
 			bwa_map_and_sort(tmp_bams[i], ref_genome, fastq_list[i][0], fastq_list[i][1])
 		else:
 			bwa_map_and_sort(tmp_bams[i], ref_genome, fastq_list[i])   
     
-    merge_bams(out_bam, *tmp_bams)
+    merge_bams(output_bam, *tmp_bams)
     
     for f in tmp_bams:
 		  os.remove(f)
@@ -936,7 +936,7 @@ def map_host_filtered_merged_reads(fastqs, bam_file):
     fq1u=fastqs[3]
     # fq2u is typicaly small and low quality
 
-    map_reads([fqm, (fq1,fq2), fqu1], reference, bam_file)
+    map_reads([fqm, (fq1,fq2), fq1u], reference, bam_file)
 
 @jobs_limit(1)
 @transform(filter_riborna_from_merged, formatter(), "{subpath[0][0]}/{subdir[0][0]}.bam")
