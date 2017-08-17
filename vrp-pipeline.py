@@ -540,12 +540,6 @@ def expand_piped_command(cmd, cmd_args, interpreter_args=None, *args):
 	return expanded_cmd
 
 
-def get_sample_ids():
-    """ Provides meaningful result only after HaplotypeCaller step"""
-    files = glob.glob(os.path.join(runs_scratch_dir,'*','*.gvcf'))
-    return [ os.path.splitext(os.path.basename(f))[0] for f in files ]
-
-
 def produce_fastqc_report(fastq_file, output_dir=None):
     args = fastq_file
     args += (' -o '+output_dir) if output_dir != None else ''
@@ -967,7 +961,7 @@ def call_variants_lofreq(bam, vcf, ref_genome):
     
     threads = 1
     mem = 4096
-    args = "call -f {ref} - o {vcf} {bam} \
+    args = "call -f {ref} -o {vcf} {bam} \
            ".format(ref=ref_genome, vcf=vcf, bam=bam)
     run_cmd(lofreq, args, dockerize=dockerize, cpus=threads, mem_per_cpu=int(mem/threads))
 
