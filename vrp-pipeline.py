@@ -1136,6 +1136,82 @@ def qc_merged_reads(input_fastqs, reports):
     for i in range(0,len(input_fastqs)):
 		produce_fastqc_report(input_fastqs[i], os.path.dirname(reports[i]))
 
+    
+def count_reads(fastq):
+    import gzip
+    with ( gzip.open(fastq) if fastq[-3:] == '.gz' else open(fastq) ) as f:
+        for i, l in enumerate(f, 1): 
+            pass   
+    return i/4
+
+def count_reads_and_basepairs(fastq):
+    """ returns a tuple (#bps, #reads) """
+    import gzip
+    
+    bps=0
+    with ( gzip.open(fastq) if fastq[-3:] == '.gz' else open(fastq) ) as f:
+        for i, l in enumerate(f,1): 
+            if i % 4 == 2:  # read sequence is in 2nd line of each four
+                bps += len(l.strip())
+                
+    return (bps, i/4)
+
+
+@collate([link_fastqs, filter_host_genome_from_merged, trim_merged_reads], 
+        regex(r'.+/(.+)/.+'), 
+        os.path.join(runs_scratch_dir,'qc','read_qc')+r'/\1.read_stats.tsv')
+def qc_host_filtering_stats(inputs, output):
+    """
+    Gather read and bp stats to make a tab separated table
+    """
+    
+    # ===============================================================
+    # SAMPLE | CATEGORY |    RAW      | MERGED/TRIMMED |  FILTERED 
+    #        |          | [bps|reads] |   [bps|reads]  | [bps|reads]
+    # ===============================================================
+    #        | MERGED   |             |                |
+    #        | PAIRED   |             |                |
+    #        | UNPAIRED |             |                |
+    #        | ALL      |             |                |
+    # ===============================================================
+
+    raw = inputs[0], inputs[1]
+    trimmed = inputs[2]
+    filtered = inputs[3]
+       
+    stats={}
+    stats['mr']  = (0,0) + \
+                   count_reads_and_basepairs(trimmed[0]) + \
+                   count_reads_and_basepairs(filtered[0])
+    
+    stats['prd'] = [sum(e) for e in zip(count_reads_and_basepairs(raw[0]), count_reads_and_basepairs(raw[1]))] + \
+                   [sum(e) for e in zip(count_reads_and_basepairs(trimmed[1]), count_reads_and_basepairs(trimmed[2]))] + \
+                   [sum(e) for e in zip(count_reads_and_basepairs(filtered[1]), count_reads_and_basepairs(filtered[2]))]
+                   
+    stats['unp'] = [0,0] + \
+                   [sum(e) for e in zip(count_reads_and_basepairs(trimmed[3]), count_reads_and_basepairs(trimmed[4]))] + \
+                   [sum(e) for e in zip(count_reads_and_basepairs(filtered[3]), count_reads_and_basepairs(filtered[4]))]
+                   
+    stats['all'] = [sum(e) for e in zip(stats['mr'], stats['prd'], stats['unp'])] 
+    
+    mrl  = 'merged\t'   + '\t'.join([str(e) for e in stats['mr']])
+    prdl = 'paired\t'   + '\t'.join([str(e) for e in stats['prd']])
+    unpl = 'unpaired\t' + '\t'.join([str(e) for e in stats['unp']])
+    alll = 'all\t'      + '\t'.join([str(e) for e in stats['all']])
+    
+    header = '\t'.join(['sample','read_category',
+                        'raw_bps', 'raw_reads',
+                        'trimmed_bps','trimmed_reads',
+                        'filtered_bps','filtered_reads'])
+    sample = os.path.basename(trimmed[0])[:-len('_merged.trimmed.fq.gz')]
+    
+    with open(output, 'w') as statf:
+        statf.write(('\n'+sample+'\t').join([header, mrl, prdl, unpl, alll]))
+    
+
+
+
+
 @follows(qc_raw_reads, qc_merged_reads)
 def qc_reads():
     pass
