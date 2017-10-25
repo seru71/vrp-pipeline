@@ -918,6 +918,17 @@ def map_reads(fastq_list, ref_genome, output_bam):
     for f in tmp_bams:
 		  os.remove(f)
 
+@jobs_limit(1)
+@transform(trim_merged_reads, formatter(), "{subpath[0][0]}/{subdir[0][0]}_notfiltered.bam")
+def map_trimmed_merged_reads(fastqs, bam_file):
+    """ Maps host-filtered reads from merging path. Both merged pairs and not-merged, paired and unpaired R1 are included """
+    fqm=fastqs[0]
+    fq1=fastqs[1]
+    fq2=fastqs[2]
+    fq1u=fastqs[3]
+    # fq2u is typicaly small and low quality
+
+    map_reads([fqm, (fq1,fq2), fq1u], reference, bam_file)
 
 
 @jobs_limit(1)
